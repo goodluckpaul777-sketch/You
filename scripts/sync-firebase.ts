@@ -142,13 +142,22 @@ function initFirebaseAdmin(): { app: App | null; db: Firestore | null } {
     return { app, db: getFirestore(app) };
   }
 
-  const saJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  let saJson = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
+  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY?.trim();
 
   try {
     if (saJson) {
+      // Support base64-encoded service account string
+      if (!saJson.startsWith('{')) {
+        try {
+          const decoded = Buffer.from(saJson, 'base64').toString('utf-8');
+          if (decoded.startsWith('{')) {
+            saJson = decoded;
+          }
+        } catch {}
+      }
       const credentials = JSON.parse(saJson);
       const app = initializeApp({
         credential: cert(credentials),
@@ -156,6 +165,8 @@ function initFirebaseAdmin(): { app: App | null; db: Firestore | null } {
       });
       return { app, db: getFirestore(app) };
     } else if (projectId && clientEmail && privateKey) {
+      // Handle escaped newlines or surrounding quotes
+      privateKey = privateKey.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
       const app = initializeApp({
         credential: cert({ projectId, clientEmail, privateKey }),
         storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`
@@ -297,6 +308,45 @@ async function main() {
       }
     }
 
+    // Handle Gallery Images Synchronization
+    const rawGallery: string[] = Array.isArray(rawData.galleryImages) ? rawData.galleryImages : [];
+    const localGalleryImages: string[] = [];
+
+    for (let i = 0; i < rawGallery.length; i++) {
+      const gItem = rawGallery[i];
+      if (!gItem) continue;
+
+      if (gItem.startsWith('/images/') || gItem.startsWith('/hero-')) {
+        localGalleryImages.push(gItem);
+        continue;
+      }
+
+      let gExt = 'jpg';
+      if (gItem.includes('.png') || gItem.startsWith('data:image/png')) gExt = 'png';
+      else if (gItem.includes('.webp') || gItem.startsWith('data:image/webp')) gExt = 'webp';
+
+      const gFilename = `prod_${docId}_gallery_${i}.${gExt}`;
+      const gTargetFilePath = path.join(IMAGES_DIR, gFilename);
+      const gExpectedLocalPath = `/images/products/${gFilename}`;
+
+      if (fs.existsSync(gTargetFilePath) && fs.statSync(gTargetFilePath).size > 0) {
+        imagesCached++;
+        localGalleryImages.push(gExpectedLocalPath);
+      } else {
+        const success = await downloadFile(gItem, gTargetFilePath);
+        if (success) {
+          imagesDownloaded++;
+          localGalleryImages.push(gExpectedLocalPath);
+        } else {
+          console.warn(`  └─ [WARN] Failed to download gallery image ${i} for ${docId}, skipping item.`);
+        }
+      }
+    }
+
+    if (localGalleryImages.length === 0 && localImagePath) {
+      localGalleryImages.push(localImagePath);
+    }
+
     // Construct the synchronized product record
     const synchronizedProduct: FabricProduct = {
       id: docId,
@@ -309,9 +359,7 @@ async function main() {
       minimumOrder: Number(rawData.minimumOrder) || 1,
       unitLabel: rawData.unitLabel || (rawData.mainSection === 'shoes' ? 'pair' : 'yard'),
       image: localImagePath || '/hero-logo.png',
-      galleryImages: Array.isArray(rawData.galleryImages) && rawData.galleryImages.length > 0
-        ? rawData.galleryImages
-        : [localImagePath || '/hero-logo.png'],
+      galleryImages: localGalleryImages.length > 0 ? localGalleryImages : [localImagePath || '/hero-logo.png'],
       colors: Array.isArray(rawData.colors) && rawData.colors.length > 0 ? rawData.colors : ['Standard Original'],
       fabricType: rawData.fabricType || 'Cotton / Ankara',
       isNewArrival: rawData.isNewArrival ?? true,
@@ -358,6 +406,19 @@ async function main() {
     if (!fs.existsSync(fullPath) || fs.statSync(fullPath).size === 0) {
       console.error(`[ERROR] Product ${p.id} references missing image on disk: ${fullPath}`);
       verificationFailed = true;
+    }
+
+    for (const g of (p.galleryImages || [])) {
+      if (g.includes('firebasestorage.googleapis.com')) {
+        console.error(`[ERROR] Remote Firebase URL still present in gallery image for ${p.id}: ${g}`);
+        verificationFailed = true;
+      }
+      const gPath = g.startsWith('/') ? g.slice(1) : g;
+      const fullGPath = path.join(ROOT_DIR, 'public', gPath);
+      if (!fs.existsSync(fullGPath) || fs.statSync(fullGPath).size === 0) {
+        console.error(`[ERROR] Product ${p.id} references missing gallery image on disk: ${fullGPath}`);
+        verificationFailed = true;
+      }
     }
   }
 

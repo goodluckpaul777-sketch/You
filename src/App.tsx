@@ -42,7 +42,7 @@ import { Footer } from './components/Footer';
 import { MessageCircle, Sparkles, Filter, SlidersHorizontal, Shirt, Footprints, Scissors, Search, Shield, ShoppingBag, Palette, ArrowLeft, ChevronLeft, ChevronRight, Layers, Package } from 'lucide-react';
 
 const STORAGE_KEYS = {
-  PRODUCTS_CACHE: 'asv_firestore_cache_products',
+  PRODUCTS_CACHE: 'asv_supabase_cache_products',
   SETTINGS: 'asv_settings_v3_luxury',
   CART: 'asv_inquiry_cart_v3',
   ORDERS: 'asv_inquiries_v3',
@@ -58,7 +58,7 @@ function safeSetLocalStorage(key: string, data: any) {
 }
 
 export default function App() {
-  // Persistence state loaders - initializes with cached Firestore data or static catalog for zero layout shift
+  // Persistence state loaders - initializes with cached Supabase data or static catalog for zero layout shift
   const [products, setProducts] = useState<FabricProduct[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS_CACHE);
@@ -914,7 +914,7 @@ export default function App() {
         products={products}
         settings={settings}
         inquiries={inquiries}
-        onSaveProduct={(prod) => {
+        onSaveProduct={async (prod) => {
           setProducts(prev => {
             const idx = prev.findIndex(p => p.id === prod.id);
             if (idx > -1) {
@@ -925,15 +925,15 @@ export default function App() {
               return [prod, ...prev];
             }
           });
-          saveProductToDatabase(prod).catch(console.error);
+          await saveProductToDatabase(prod);
         }}
-        onDeleteProduct={(id) => {
+        onDeleteProduct={async (id) => {
           setProducts(prev => prev.filter(p => p.id !== id));
-          deleteProductFromDatabase(id).catch(console.error);
+          await deleteProductFromDatabase(id);
         }}
-        onUpdateSettings={(newSettings) => {
+        onUpdateSettings={async (newSettings) => {
           setSettings(newSettings);
-          saveSettingsToDatabase(newSettings).catch(console.error);
+          await saveSettingsToDatabase(newSettings);
         }}
         onUpdateInquiryStatus={(inqId, status) => {
           setInquiries(prev => {
@@ -947,7 +947,7 @@ export default function App() {
           setProducts(INITIAL_PRODUCTS);
           setSettings(INITIAL_STORE_SETTINGS);
           try {
-            localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
+            localStorage.removeItem(STORAGE_KEYS.PRODUCTS_CACHE);
             localStorage.removeItem(STORAGE_KEYS.SETTINGS);
           } catch {
             // ignore

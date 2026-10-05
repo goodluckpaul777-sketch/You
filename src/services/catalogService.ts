@@ -1,19 +1,15 @@
-import {
-  collection,
-  doc,
-  onSnapshot,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  getDoc,
-  query,
-  orderBy,
-  Unsubscribe,
-  writeBatch
-} from 'firebase/firestore';
-import { getFirebaseDb, isFirebaseConfigured } from './firebase';
 import { FabricProduct, StoreSettings, InquiryRecord } from '../types';
 import { INITIAL_PRODUCTS, INITIAL_STORE_SETTINGS } from '../data/initialData';
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  uploadImageToSupabaseStorage,
+  getSupabaseConfig,
+  saveSupabaseConfig
+} from './supabase';
+
+// Re-export Supabase helpers for AdminPortal
+export { isSupabaseConfigured, getSupabaseConfig, saveSupabaseConfig, uploadImageToSupabaseStorage };
 
 // -----------------------------------------------------
 // TYPES & SYNC STATUS
@@ -24,13 +20,13 @@ export interface SyncState {
   status: SyncStatus;
   message: string;
   lastUpdated?: string;
-  source: 'firestore' | 'local_cache' | 'offline_fallback';
+  source: 'supabase' | 'local_cache' | 'offline_fallback';
 }
 
 let currentSyncState: SyncState = {
-  status: isFirebaseConfigured() ? 'saving' : 'offline',
-  message: isFirebaseConfigured() ? 'Connecting to Firebase...' : 'Using Local Catalog (Firebase Not Configured)',
-  source: isFirebaseConfigured() ? 'firestore' : 'offline_fallback',
+  status: isSupabaseConfigured() ? 'saving' : 'offline',
+  message: isSupabaseConfigured() ? 'Connecting to Supabase...' : 'Using Local Catalog (Supabase Not Configured)',
+  source: isSupabaseConfigured() ? 'supabase' : 'offline_fallback',
   lastUpdated: new Date().toISOString()
 };
 
@@ -83,11 +79,135 @@ export function normalizeImageUrl(url: any): string {
 }
 
 // -----------------------------------------------------
-// LOCAL CACHING (Read-Only Fallback - Never Overwrites Firestore)
+// ROW MAPPERS (PostgreSQL snake_case & camelCase compatible)
 // -----------------------------------------------------
-const CACHE_KEY_PRODUCTS = 'asv_firestore_cache_products';
-const CACHE_KEY_SETTINGS = 'asv_firestore_cache_settings';
-const CACHE_KEY_INQUIRIES = 'asv_firestore_cache_inquiries';
+export function mapRowToProduct(row: any): FabricProduct {
+  const image = normalizeImageUrl(row.image_url || row.image || '');
+  let gallery: string[] = [];
+
+  if (Array.isArray(row.gallery_images)) {
+    gallery = row.gallery_images.map(normalizeImageUrl).filter(Boolean);
+  } else if (Array.isArray(row.galleryImages)) {
+    gallery = row.galleryImages.map(normalizeImageUrl).filter(Boolean);
+  } else if (typeof row.gallery_images === 'string') {
+    try {
+      const parsed = JSON.parse(row.gallery_images);
+      if (Array.isArray(parsed)) gallery = parsed.map(normalizeImageUrl).filter(Boolean);
+    } catch {}
+  }
+
+  if (gallery.length === 0 && image) {
+    gallery = [image];
+  }
+
+  let colors: string[] = ['Standard Original'];
+  if (Array.isArray(row.colors)) {
+    colors = row.colors;
+  } else if (typeof row.colors === 'string') {
+    try {
+      const parsed = JSON.parse(row.colors);
+      if (Array.isArray(parsed)) colors = parsed;
+    } catch {
+      colors = [row.colors];
+    }
+  }
+
+  let suitableFor: string[] = ['Retail & Wholesale'];
+  if (Array.isArray(row.suitable_for)) {
+    suitableFor = row.suitable_for;
+  } else if (Array.isArray(row.suitableFor)) {
+    suitableFor = row.suitableFor;
+  }
+
+  return {
+    id: String(row.id),
+    name: row.name || 'Untitled Product',
+    mainSection: row.main_section || row.mainSection || 'cloths',
+    category: row.category || '',
+    categorySlug: row.category_slug || row.categorySlug || 'general',
+    description: row.description || '',
+    availableStock: row.available_stock ?? row.availableStock ?? row.stock ?? 50,
+    minimumOrder: row.minimum_order ?? row.minimumOrder ?? 1,
+    unitLabel: row.unit_label || row.unitLabel || '',
+    image,
+    galleryImages: gallery,
+    colors,
+    fabricType: row.fabric_type || row.fabricType || '',
+    isNewArrival: row.is_new_arrival ?? row.isNewArrival ?? true,
+    isFeatured: row.is_featured ?? row.isFeatured ?? true,
+    isBestseller: row.is_bestseller ?? row.isBestseller ?? false,
+    inStock: row.in_stock ?? row.inStock ?? row.availability ?? true,
+    rating: Number(row.rating ?? 4.9),
+    reviewCount: Number(row.review_count ?? row.reviewCount ?? 20),
+    suitableFor,
+    textureNote: row.texture_note || row.textureNote || '',
+    origin: row.origin || 'Lagos, Nigeria',
+    isWholesaleAvailable: row.is_wholesale_available ?? row.isWholesaleAvailable ?? true,
+    wholesaleNote: row.wholesale_note || row.wholesaleNote || 'Contact on WhatsApp for wholesale cartons & bundle rates.',
+    badge: row.badge || '',
+    productCode: row.product_code || row.productCode || '',
+    designGroupId: row.design_group_id || row.designGroupId || undefined,
+    designGroupName: row.design_group_name || row.designGroupName || undefined,
+    colorVariant: row.color_variant || row.colorVariant || undefined,
+    isMatchingSet: row.is_matching_set ?? row.isMatchingSet ?? false,
+    designType: row.design_type || row.designType || undefined,
+    pricePerYard: Number(row.price_per_yard ?? row.pricePerYard ?? row.price ?? 0),
+    price: Number(row.price ?? row.price_per_yard ?? row.pricePerYard ?? 0),
+    createdAt: row.created_at || row.createdAt || undefined,
+    updatedAt: row.updated_at || row.updatedAt || undefined
+  };
+}
+
+export function mapProductToRow(p: FabricProduct): Record<string, any> {
+  const now = new Date().toISOString();
+  return {
+    id: String(p.id),
+    name: p.name || 'Untitled Product',
+    main_section: p.mainSection || 'cloths',
+    category: p.category || '',
+    category_slug: p.categorySlug || 'general',
+    description: p.description || '',
+    available_stock: Number(p.availableStock ?? 50),
+    minimum_order: Number(p.minimumOrder ?? 1),
+    unit_label: p.unitLabel || '',
+    image: normalizeImageUrl(p.image || ''),
+    image_url: normalizeImageUrl(p.image || ''),
+    gallery_images: Array.isArray(p.galleryImages)
+      ? p.galleryImages.map(normalizeImageUrl).filter(Boolean)
+      : p.image ? [normalizeImageUrl(p.image)] : [],
+    colors: Array.isArray(p.colors) ? p.colors : ['Standard Original'],
+    fabric_type: p.fabricType || '',
+    is_new_arrival: !!p.isNewArrival,
+    is_featured: !!p.isFeatured,
+    is_bestseller: !!p.isBestseller,
+    in_stock: p.inStock !== false,
+    rating: Number(p.rating ?? 4.9),
+    review_count: Number(p.reviewCount ?? 20),
+    suitable_for: Array.isArray(p.suitableFor) ? p.suitableFor : ['Retail & Wholesale'],
+    texture_note: p.textureNote || '',
+    origin: p.origin || 'Lagos, Nigeria',
+    is_wholesale_available: p.isWholesaleAvailable !== false,
+    wholesale_note: p.wholesaleNote || '',
+    badge: p.badge || '',
+    product_code: p.productCode || '',
+    design_group_id: p.designGroupId || null,
+    design_group_name: p.designGroupName || null,
+    color_variant: p.colorVariant || null,
+    is_matching_set: !!p.isMatchingSet,
+    design_type: p.designType || null,
+    price_per_yard: Number(p.pricePerYard ?? p.price ?? 0),
+    price: Number(p.price ?? p.pricePerYard ?? 0),
+    created_at: p.createdAt || now,
+    updated_at: now
+  };
+}
+
+// -----------------------------------------------------
+// LOCAL CACHING (Read-Only Fallback - Never Overwrites Supabase)
+// -----------------------------------------------------
+const CACHE_KEY_PRODUCTS = 'asv_supabase_cache_products';
+const CACHE_KEY_SETTINGS = 'asv_supabase_cache_settings';
+const CACHE_KEY_INQUIRIES = 'asv_supabase_cache_inquiries';
 
 function getCachedProducts(): FabricProduct[] {
   if (typeof window === 'undefined') return INITIAL_PRODUCTS;
@@ -115,7 +235,7 @@ function setCachedProducts(products: FabricProduct[]) {
 }
 
 // -----------------------------------------------------
-// REAL-TIME PRODUCTS SUBSCRIPTION (Firestore Live onSnapshot)
+// REAL-TIME PRODUCTS SUBSCRIPTION (Supabase Live Realtime)
 // -----------------------------------------------------
 export function subscribeToProducts(
   onUpdate: (products: FabricProduct[]) => void,
@@ -124,13 +244,13 @@ export function subscribeToProducts(
   // Push initial cached data immediately for zero layout shift
   onUpdate(getCachedProducts());
 
-  const db = getFirebaseDb();
+  const supabase = getSupabaseClient();
 
-  // If Firebase is not configured or available, fall back cleanly to local catalog
-  if (!db) {
+  // If Supabase is not configured, fall back cleanly to local catalog
+  if (!supabase) {
     notifySyncStatus({
       status: 'offline',
-      message: 'Offline (Using Local Catalog)',
+      message: 'Offline (Using Local Catalog - Supabase Not Configured)',
       source: 'offline_fallback'
     });
 
@@ -149,75 +269,88 @@ export function subscribeToProducts(
 
   notifySyncStatus({
     status: 'saving',
-    message: 'Listening for live catalog changes...',
-    source: 'firestore'
+    message: 'Connecting to Supabase...',
+    source: 'supabase'
   });
 
-  const productsCollection = collection(db, 'products');
+  let isCancelled = false;
 
-  let isFirstLoad = true;
-  const unsubscribe: Unsubscribe = onSnapshot(
-    productsCollection,
-    (snapshot) => {
-      // If Firestore collection has documents, Firestore is the absolute source of truth
-      if (!snapshot.empty) {
-        const liveProducts: FabricProduct[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          const cleanDocId = docSnap.id;
-          return {
-            ...data,
-            id: cleanDocId,
-            image: normalizeImageUrl(data.image),
-            galleryImages: Array.isArray(data.galleryImages)
-              ? data.galleryImages.map((img: string) => normalizeImageUrl(img)).filter(Boolean)
-              : data.image
-              ? [normalizeImageUrl(data.image)]
-              : []
-          } as FabricProduct;
-        });
+  // Helper function to fetch full product list from Supabase
+  const fetchLiveProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-        // Safely cache for offline usage only
+      if (isCancelled) return;
+
+      if (error) {
+        throw error;
+      }
+
+      if (data && data.length > 0) {
+        const liveProducts = data.map(mapRowToProduct);
         setCachedProducts(liveProducts);
-
         onUpdate(liveProducts);
         notifySyncStatus({
           status: 'synced',
-          message: `Synced with Firebase (${liveProducts.length} items live)`,
-          source: 'firestore'
+          message: `Synced with Supabase (${liveProducts.length} items live)`,
+          source: 'supabase'
         });
       } else {
-        // Firestore is initialized but collection has no documents yet
-        // Fall back to local catalog so user can seed or add products
+        // Table exists but is empty - fall back to local catalog so admin can seed
         const fallback = getCachedProducts();
         onUpdate(fallback);
         notifySyncStatus({
           status: 'synced',
-          message: 'Firestore empty. Ready to seed local catalog.',
+          message: 'Supabase connected. Database empty (ready to seed catalog).',
           source: 'offline_fallback'
         });
       }
-      isFirstLoad = false;
-    },
-    (error) => {
-      console.error('[Firebase] Error in live products listener:', error);
+    } catch (err: any) {
+      if (isCancelled) return;
+      console.error('[Supabase] Error loading products:', err);
       notifySyncStatus({
         status: 'error',
-        message: `Sync Error: ${error.message || 'Connection failed'}. Using cached catalog.`,
+        message: `Supabase Error: ${err.message || 'Connection failed'}. Using cached catalog.`,
         source: 'local_cache'
       });
-      // Fallback to cache without breaking the UI
       onUpdate(getCachedProducts());
-      if (onError) onError(error);
+      if (onError) onError(err);
     }
-  );
+  };
+
+  // Trigger initial fetch
+  fetchLiveProducts();
+
+  // Subscribe to Realtime postgres_changes on products table
+  const channel = supabase
+    .channel('realtime:public:products')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'products' },
+      (payload) => {
+        console.log('[Supabase Realtime] Product event received:', payload.eventType);
+        fetchLiveProducts();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[Supabase Realtime] Successfully subscribed to products channel.');
+      } else if (status === 'CHANNEL_ERROR') {
+        console.warn('[Supabase Realtime] Channel subscription warning.');
+      }
+    });
 
   return () => {
-    unsubscribe();
+    isCancelled = true;
+    supabase.removeChannel(channel);
   };
 }
 
 // -----------------------------------------------------
-// CREATE / UPDATE PRODUCT IN FIRESTORE
+// CREATE / UPDATE PRODUCT IN SUPABASE
 // -----------------------------------------------------
 export async function saveProductToDatabase(product: FabricProduct): Promise<void> {
   const cleanId = String(product.id || `prod-${Date.now()}`);
@@ -236,24 +369,46 @@ export async function saveProductToDatabase(product: FabricProduct): Promise<voi
 
   notifySyncStatus({
     status: 'saving',
-    message: `Saving "${product.name}" to Firebase...`,
-    source: 'firestore'
+    message: `Saving "${product.name}" to Supabase...`,
+    source: 'supabase'
   });
 
-  const db = getFirebaseDb();
+  const supabase = getSupabaseClient();
 
-  // If Firebase is available, save directly to Firestore
-  if (db) {
+  if (supabase) {
     try {
-      const docRef = doc(db, 'products', cleanId);
-      // Remove any undefined properties to adhere to Firestore rules
-      const cleanData = JSON.parse(JSON.stringify(normalizedProduct));
-      await setDoc(docRef, cleanData, { merge: true });
+      const fullRow = mapProductToRow(normalizedProduct);
+
+      // Attempt upsert with full row
+      let { error } = await supabase.from('products').upsert(fullRow, { onConflict: 'id' });
+
+      // If full row fails due to missing optional columns in user table, retry with core fields
+      if (error && error.code === '42703') {
+        console.warn('[Supabase] Missing optional columns in products table. Retrying with core columns.');
+        const coreRow = {
+          id: fullRow.id,
+          name: fullRow.name,
+          category: fullRow.category,
+          price: fullRow.price,
+          description: fullRow.description,
+          image: fullRow.image,
+          image_url: fullRow.image_url,
+          available_stock: fullRow.available_stock,
+          created_at: fullRow.created_at,
+          updated_at: fullRow.updated_at
+        };
+        const retry = await supabase.from('products').upsert(coreRow, { onConflict: 'id' });
+        error = retry.error;
+      }
+
+      if (error) {
+        throw error;
+      }
 
       notifySyncStatus({
         status: 'saved',
-        message: `Saved "${product.name}" to Firebase`,
-        source: 'firestore'
+        message: `Saved "${product.name}" to Supabase`,
+        source: 'supabase'
       });
 
       // Update local cache
@@ -267,28 +422,27 @@ export async function saveProductToDatabase(product: FabricProduct): Promise<voi
       setCachedProducts(cached);
       notifyLocalListeners();
 
-      // Return status to synced after 2 seconds
       setTimeout(() => {
         notifySyncStatus({
           status: 'synced',
-          message: 'Synced with Firebase',
-          source: 'firestore'
+          message: 'Synced with Supabase',
+          source: 'supabase'
         });
       }, 2000);
       return;
     } catch (err: any) {
-      console.error('[Firebase] Failed to write product to Firestore:', err);
+      console.error('[Supabase] Failed to write product:', err);
       notifySyncStatus({
         status: 'error',
-        message: `Failed to save to Firebase: ${err.message || String(err)}`,
-        source: 'firestore'
+        message: `Failed to save to Supabase: ${err.message || String(err)}`,
+        source: 'supabase'
       });
       throw err;
     }
   }
 
-  // Offline fallback if Firebase is not connected
-  console.warn('[Firebase] Database not connected. Storing product in offline cache.');
+  // Offline fallback if Supabase is not configured
+  console.warn('[Supabase] Client not configured. Storing product in local cache.');
   const cached = getCachedProducts();
   const idx = cached.findIndex(p => p.id === cleanId);
   if (idx > -1) {
@@ -300,37 +454,36 @@ export async function saveProductToDatabase(product: FabricProduct): Promise<voi
   notifyLocalListeners();
   notifySyncStatus({
     status: 'offline',
-    message: 'Saved to local cache (Firebase Offline)',
+    message: 'Saved to local cache (Supabase Not Configured)',
     source: 'offline_fallback'
   });
 }
 
 // -----------------------------------------------------
-// DELETE PRODUCT FROM FIRESTORE
+// DELETE PRODUCT FROM SUPABASE
 // -----------------------------------------------------
 export async function deleteProductFromDatabase(productId: string): Promise<void> {
   if (!productId) return;
 
   notifySyncStatus({
     status: 'saving',
-    message: `Deleting product ${productId} from Firebase...`,
-    source: 'firestore'
+    message: `Deleting product ${productId} from Supabase...`,
+    source: 'supabase'
   });
 
-  const db = getFirebaseDb();
+  const supabase = getSupabaseClient();
 
-  if (db) {
+  if (supabase) {
     try {
-      const docRef = doc(db, 'products', productId);
-      await deleteDoc(docRef);
+      const { error } = await supabase.from('products').delete().eq('id', productId);
+      if (error) throw error;
 
       notifySyncStatus({
         status: 'saved',
-        message: `Deleted product from Firebase`,
-        source: 'firestore'
+        message: 'Deleted product from Supabase',
+        source: 'supabase'
       });
 
-      // Update local cache
       const cached = getCachedProducts().filter(p => p.id !== productId);
       setCachedProducts(cached);
       notifyLocalListeners();
@@ -338,17 +491,17 @@ export async function deleteProductFromDatabase(productId: string): Promise<void
       setTimeout(() => {
         notifySyncStatus({
           status: 'synced',
-          message: 'Synced with Firebase',
-          source: 'firestore'
+          message: 'Synced with Supabase',
+          source: 'supabase'
         });
       }, 2000);
       return;
     } catch (err: any) {
-      console.error('[Firebase] Failed to delete product from Firestore:', err);
+      console.error('[Supabase] Failed to delete product:', err);
       notifySyncStatus({
         status: 'error',
-        message: `Failed to delete from Firebase: ${err.message || String(err)}`,
-        source: 'firestore'
+        message: `Failed to delete from Supabase: ${err.message || String(err)}`,
+        source: 'supabase'
       });
       throw err;
     }
@@ -360,62 +513,48 @@ export async function deleteProductFromDatabase(productId: string): Promise<void
   notifyLocalListeners();
   notifySyncStatus({
     status: 'offline',
-    message: 'Deleted from local cache (Firebase Offline)',
+    message: 'Deleted from local cache (Supabase Offline)',
     source: 'offline_fallback'
   });
 }
 
 // -----------------------------------------------------
-// SAFE SEED / SYNC LOCAL CATALOG TO FIRESTORE (Non-destructive)
+// 1-CLICK MIGRATION / SEED LOCAL CATALOG TO SUPABASE
 // -----------------------------------------------------
 export async function syncAllProductsToDatabase(products: FabricProduct[]): Promise<number> {
-  const db = getFirebaseDb();
-  if (!db) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
     setCachedProducts(products);
     notifyLocalListeners();
-    return products.length;
+    throw new Error('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment or Settings.');
   }
 
   notifySyncStatus({
     status: 'saving',
-    message: `Syncing ${products.length} products to Firebase Firestore...`,
-    source: 'firestore'
+    message: `Migrating ${products.length} products to Supabase...`,
+    source: 'supabase'
   });
 
   let syncedCount = 0;
-  const now = new Date().toISOString();
+  const rows = products.map(p => mapProductToRow(p));
 
-  // Write in batches of up to 40 items to respect Firestore batch limit of 500 operations
-  for (let i = 0; i < products.length; i += 40) {
-    const chunk = products.slice(i, i + 40);
-    const batch = writeBatch(db);
-
-    for (const p of chunk) {
-      const cleanId = String(p.id || `prod-${Date.now()}-${syncedCount}`);
-      const docRef = doc(db, 'products', cleanId);
-      const cleanData = JSON.parse(JSON.stringify({
-        ...p,
-        id: cleanId,
-        image: normalizeImageUrl(p.image),
-        galleryImages: Array.isArray(p.galleryImages)
-          ? p.galleryImages.map(img => normalizeImageUrl(img)).filter(Boolean)
-          : p.image ? [normalizeImageUrl(p.image)] : [],
-        updatedAt: p.updatedAt || now,
-        createdAt: p.createdAt || now
-      }));
-      batch.set(docRef, cleanData, { merge: true });
-      syncedCount++;
+  // Upsert in batches of 20
+  for (let i = 0; i < rows.length; i += 20) {
+    const chunk = rows.slice(i, i + 20);
+    const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
+    if (error) {
+      console.error('[Supabase] Migration batch error:', error);
+      throw error;
     }
-
-    await batch.commit();
+    syncedCount += chunk.length;
   }
 
   setCachedProducts(products);
   notifyLocalListeners();
   notifySyncStatus({
     status: 'synced',
-    message: `Successfully synced ${syncedCount} products to Firebase!`,
-    source: 'firestore'
+    message: `Successfully migrated ${syncedCount} products to Supabase!`,
+    source: 'supabase'
   });
 
   return syncedCount;
@@ -423,19 +562,17 @@ export async function syncAllProductsToDatabase(products: FabricProduct[]): Prom
 
 // Delete all products (Used by Admin reset)
 export async function deleteAllProducts(): Promise<void> {
-  const db = getFirebaseDb();
-  if (db) {
-    const snapshot = await getDocs(collection(db, 'products'));
-    const batch = writeBatch(db);
-    snapshot.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    const { error } = await supabase.from('products').delete().neq('id', '___prevent_empty_clause___');
+    if (error) console.warn('[Supabase] Delete all warning:', error);
   }
   setCachedProducts([]);
   notifyLocalListeners();
   notifySyncStatus({
     status: 'synced',
     message: 'Catalog cleared',
-    source: 'firestore'
+    source: 'supabase'
   });
 }
 
@@ -450,10 +587,9 @@ export async function removeAllProductImages(): Promise<number> {
 }
 
 // -----------------------------------------------------
-// STORE SETTINGS (Firestore Collection 'settings', doc 'store_settings')
+// STORE SETTINGS (Supabase Table 'settings', row id 'store_settings')
 // -----------------------------------------------------
 export function subscribeToSettings(onUpdate: (settings: StoreSettings) => void): () => void {
-  // Push cached settings first
   let cached = INITIAL_STORE_SETTINGS;
   if (typeof window !== 'undefined') {
     try {
@@ -463,8 +599,8 @@ export function subscribeToSettings(onUpdate: (settings: StoreSettings) => void)
   }
   onUpdate(cached);
 
-  const db = getFirebaseDb();
-  if (!db) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
     const handleUpdate = () => {
       try {
         const stored = localStorage.getItem(CACHE_KEY_SETTINGS);
@@ -481,20 +617,43 @@ export function subscribeToSettings(onUpdate: (settings: StoreSettings) => void)
     };
   }
 
-  const docRef = doc(db, 'settings', 'store_settings');
-  const unsubscribe = onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      const live = docSnap.data() as StoreSettings;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(CACHE_KEY_SETTINGS, JSON.stringify(live));
+  // Fetch settings from Supabase
+  supabase
+    .from('settings')
+    .select('data')
+    .eq('id', 'store_settings')
+    .maybeSingle()
+    .then(({ data, error }) => {
+      if (!error && data && data.data) {
+        const live = data.data as StoreSettings;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(CACHE_KEY_SETTINGS, JSON.stringify(live));
+        }
+        onUpdate(live);
       }
-      onUpdate(live);
-    }
-  }, (err) => {
-    console.warn('[Firebase] Settings listener notice:', err.message);
-  });
+    });
 
-  return () => unsubscribe();
+  // Realtime settings channel
+  const channel = supabase
+    .channel('realtime:public:settings')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'settings', filter: 'id=eq.store_settings' },
+      (payload) => {
+        if (payload.new && (payload.new as any).data) {
+          const live = (payload.new as any).data as StoreSettings;
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(CACHE_KEY_SETTINGS, JSON.stringify(live));
+          }
+          onUpdate(live);
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 export async function saveSettingsToDatabase(settings: StoreSettings): Promise<void> {
@@ -503,20 +662,22 @@ export async function saveSettingsToDatabase(settings: StoreSettings): Promise<v
   }
   notifyLocalListeners();
 
-  const db = getFirebaseDb();
-  if (db) {
+  const supabase = getSupabaseClient();
+  if (supabase) {
     try {
-      const docRef = doc(db, 'settings', 'store_settings');
-      const cleanData = JSON.parse(JSON.stringify(settings));
-      await setDoc(docRef, cleanData, { merge: true });
+      await supabase.from('settings').upsert({
+        id: 'store_settings',
+        data: settings,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
     } catch (err) {
-      console.warn('[Firebase] Failed to write settings to Firestore:', err);
+      console.warn('[Supabase] Failed to write settings:', err);
     }
   }
 }
 
 // -----------------------------------------------------
-// INQUIRIES & ORDERS (Firestore Collection 'inquiries')
+// INQUIRIES & ORDERS (Supabase Table 'inquiries')
 // -----------------------------------------------------
 export function subscribeToInquiries(onUpdate: (inquiries: InquiryRecord[]) => void): () => void {
   let cached: InquiryRecord[] = [];
@@ -528,8 +689,8 @@ export function subscribeToInquiries(onUpdate: (inquiries: InquiryRecord[]) => v
   }
   onUpdate(cached);
 
-  const db = getFirebaseDb();
-  if (!db) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
     const handleUpdate = () => {
       try {
         const stored = localStorage.getItem(CACHE_KEY_INQUIRIES);
@@ -546,28 +707,49 @@ export function subscribeToInquiries(onUpdate: (inquiries: InquiryRecord[]) => v
     };
   }
 
-  const inqCollection = collection(db, 'inquiries');
-  const unsubscribe = onSnapshot(inqCollection, (snapshot) => {
-    const list: InquiryRecord[] = snapshot.docs.map(d => ({
-      ...d.data(),
-      id: d.id
-    } as InquiryRecord));
+  const fetchInquiries = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('inquiries')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    list.sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return timeB - timeA;
-    });
+      if (!error && data) {
+        const list: InquiryRecord[] = data.map((d: any) => ({
+          id: d.id,
+          inquiryNumber: d.inquiry_number || d.inquiryNumber,
+          customer: d.customer,
+          items: d.items,
+          status: d.status || 'New Inquiry',
+          createdAt: d.created_at || d.createdAt
+        }));
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(CACHE_KEY_INQUIRIES, JSON.stringify(list));
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(CACHE_KEY_INQUIRIES, JSON.stringify(list));
+        }
+        onUpdate(list);
+      }
+    } catch (err) {
+      console.warn('[Supabase] Inquiries fetch error:', err);
     }
-    onUpdate(list);
-  }, (err) => {
-    console.warn('[Firebase] Inquiries listener notice:', err.message);
-  });
+  };
 
-  return () => unsubscribe();
+  fetchInquiries();
+
+  const channel = supabase
+    .channel('realtime:public:inquiries')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'inquiries' },
+      () => {
+        fetchInquiries();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 export async function saveInquiryToDatabase(inquiry: InquiryRecord): Promise<void> {
@@ -589,14 +771,20 @@ export async function saveInquiryToDatabase(inquiry: InquiryRecord): Promise<voi
   }
   notifyLocalListeners();
 
-  const db = getFirebaseDb();
-  if (db) {
+  const supabase = getSupabaseClient();
+  if (supabase) {
     try {
-      const docRef = doc(db, 'inquiries', cleanId);
-      const cleanData = JSON.parse(JSON.stringify(normalized));
-      await setDoc(docRef, cleanData, { merge: true });
+      await supabase.from('inquiries').upsert({
+        id: cleanId,
+        inquiry_number: normalized.inquiryNumber,
+        customer: normalized.customer,
+        items: normalized.items,
+        status: normalized.status,
+        created_at: normalized.createdAt,
+        updated_at: now
+      }, { onConflict: 'id' });
     } catch (err) {
-      console.warn('[Firebase] Failed to write inquiry to Firestore:', err);
+      console.warn('[Supabase] Failed to write inquiry:', err);
     }
   }
 }

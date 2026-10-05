@@ -2,14 +2,22 @@ import React, { useState, useRef } from 'react';
 import { FabricProduct, StoreSettings, InquiryRecord, MainSectionType, SectionCategoryInfo } from '../types';
 import { MAIN_SECTIONS, OFFICIAL_LOGO_URL } from '../data/initialData';
 import { compressImage } from '../utils/imageCompressor';
-import { syncAllProductsToDatabase, removeAllProductImages, deleteAllProducts } from '../services/catalogService';
+import {
+  syncAllProductsToDatabase,
+  removeAllProductImages,
+  deleteAllProducts,
+  isSupabaseConfigured,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  uploadImageToSupabaseStorage
+} from '../services/catalogService';
 import { safeOpenUrl } from '../utils/formatters';
 import { 
   Plus, Edit, Trash2, Package, Truck, Settings, ShoppingBag, 
   Check, RefreshCw, Upload, Star, ArrowLeft, ArrowRight, Image as ImageIcon, Eye,
   LogOut, Shield, Phone, MessageCircle, Layers, CheckCircle2, AlertCircle, Sparkles,
   Search, Filter, ExternalLink, Scissors, Footprints, Shirt, Lock, EyeOff, KeyRound,
-  Download, UploadCloud
+  Download, UploadCloud, Database, Cloud
 } from 'lucide-react';
 import { FacebookIcon, TikTokIcon } from './SocialIcons';
 
@@ -19,9 +27,9 @@ interface AdminPortalProps {
   products: FabricProduct[];
   settings: StoreSettings;
   inquiries: InquiryRecord[];
-  onSaveProduct: (product: FabricProduct) => void;
-  onDeleteProduct: (id: string) => void;
-  onUpdateSettings: (newSettings: StoreSettings) => void;
+  onSaveProduct: (product: FabricProduct) => Promise<void> | void;
+  onDeleteProduct: (id: string) => Promise<void> | void;
+  onUpdateSettings: (newSettings: StoreSettings) => Promise<void> | void;
   onUpdateInquiryStatus: (inquiryId: string, status: InquiryRecord['status']) => void;
   onResetToDefaults: () => void;
 }
@@ -101,20 +109,28 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState<FabricProduct | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [saveErrorMsg, setSaveErrorMsg] = useState('');
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [newImageUrl, setNewImageUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [supabaseConfig, setSupabaseConfigState] = useState(() => getSupabaseConfig());
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(() => getSupabaseConfig()?.url || '');
+  const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState(() => getSupabaseConfig()?.anonKey || '');
+  const [supabaseConfigMsg, setSupabaseConfigMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSyncAllToCloud = async () => {
     setIsSyncing(true);
+    setSaveErrorMsg('');
     try {
       const count = await syncAllProductsToDatabase(products);
-      setSaveSuccessMsg(`Successfully pushed ${count} products & custom images to live cloud storage! Your hosted website on Vercel will now show these items.`);
+      setSaveSuccessMsg(`Successfully migrated ${count} products & custom images to live Supabase online database! All devices will now see these items.`);
       setTimeout(() => setSaveSuccessMsg(''), 7000);
-    } catch (err) {
-      setSaveSuccessMsg('Error syncing to cloud: ' + String(err));
-      setTimeout(() => setSaveSuccessMsg(''), 6000);
+    } catch (err: any) {
+      setSaveErrorMsg('Error syncing to Supabase: ' + (err.message || String(err)));
+      setTimeout(() => setSaveErrorMsg(''), 7000);
     } finally {
       setIsSyncing(false);
     }
@@ -292,12 +308,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    setIsUploadingImage(true);
+    setSaveErrorMsg('');
+
     for (const file of Array.from(files)) {
       try {
         const compressed = await compressImage(file, 800, 0.75);
+        let finalImageUrl = compressed;
+
+        // If Supabase Storage is configured, upload directly to the bucket 'product-images'
+        if (isSupabaseConfigured()) {
+          try {
+            finalImageUrl = await uploadImageToSupabaseStorage(
+              compressed,
+              `${productForm.name || 'product'}_${Date.now()}`
+            );
+          } catch (storageErr: any) {
+            console.warn('[Supabase Storage] Upload notice:', storageErr);
+            setSaveErrorMsg(`Note on image storage: ${storageErr.message || 'Image stored as preview'}`);
+          }
+        }
+
         setProductForm((prev) => {
           const existing = prev.galleryImages || (prev.image ? [prev.image] : []);
-          const updated = [...existing, compressed];
+          const updated = [...existing, finalImageUrl];
           return {
             ...prev,
             galleryImages: updated,
@@ -308,6 +342,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         console.error('Image upload compression error:', err);
       }
     }
+
+    setIsUploadingImage(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -346,55 +382,87 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleSaveProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name?.trim()) {
-      setSaveSuccessMsg('Please enter a product name');
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setSaveErrorMsg('Please enter a product name');
+      setTimeout(() => setSaveErrorMsg(''), 4000);
       return;
     }
 
-    const rawGallery = (productForm.galleryImages && productForm.galleryImages.length > 0)
-      ? productForm.galleryImages
-      : (productForm.image ? [productForm.image] : []);
+    setIsSavingProduct(true);
+    setSaveErrorMsg('');
 
-    // Compress all images in gallery asynchronously
-    const compressedGallery = await Promise.all(
-      rawGallery.map(img => compressImage(img, 800, 0.75))
-    );
+    try {
+      const rawGallery = (productForm.galleryImages && productForm.galleryImages.length > 0)
+        ? productForm.galleryImages
+        : (productForm.image ? [productForm.image] : []);
 
-    const autoGeneratedCode = productForm.productCode?.trim() || `019${String(products.length + 1).padStart(3, '0')}-1`;
+      // Compress all images in gallery asynchronously
+      const compressedGallery = await Promise.all(
+        rawGallery.map(img => compressImage(img, 800, 0.75))
+      );
 
-    const productToSave: FabricProduct = {
-      id: productForm.id || `prod-${Date.now()}`,
-      name: productForm.name.trim(),
-      mainSection: (productForm.mainSection as MainSectionType) || 'cloths',
-      category: '',
-      categorySlug: 'general',
-      description: '',
-      availableStock: Number(productForm.availableStock) || 50,
-      minimumOrder: Number(productForm.minimumOrder) || 1,
-      unitLabel: '',
-      image: compressedGallery[0] || productForm.image || '/hero-logo.png',
-      galleryImages: compressedGallery,
-      colors: Array.isArray(productForm.colors) ? productForm.colors : ['Multi'],
-      fabricType: '',
-      isNewArrival: !!productForm.isNewArrival,
-      isFeatured: !!productForm.isFeatured,
-      inStock: productForm.inStock !== false,
-      rating: productForm.rating || 4.9,
-      reviewCount: productForm.reviewCount || 20,
-      suitableFor: productForm.suitableFor || ['Retail & Wholesale'],
-      textureNote: productForm.textureNote || '',
-      origin: productForm.origin || 'Lagos, Nigeria',
-      isWholesaleAvailable: productForm.isWholesaleAvailable !== false,
-      wholesaleNote: productForm.wholesaleNote || 'Contact on WhatsApp for wholesale inquiry.',
-      badge: productForm.badge || '',
-      productCode: autoGeneratedCode,
-    };
+      // If Supabase Storage is configured, convert any remaining data URLs to Supabase Storage URLs
+      let uploadedGallery = compressedGallery;
+      if (isSupabaseConfigured()) {
+        uploadedGallery = await Promise.all(
+          compressedGallery.map(async (img, idx) => {
+            if (img.startsWith('data:')) {
+              try {
+                return await uploadImageToSupabaseStorage(img, `${productForm.name || 'product'}_${idx}`);
+              } catch (upErr) {
+                console.warn('[Supabase Storage] Failed to upload image to bucket:', upErr);
+                return img;
+              }
+            }
+            return img;
+          })
+        );
+      }
 
-    onSaveProduct(productToSave);
-    setSaveSuccessMsg(`Saved "${productToSave.name}" permanently to Cloud Database!`);
-    setTimeout(() => setSaveSuccessMsg(''), 4000);
-    setEditingProduct(null);
-    setIsCreatingNew(false);
+      const autoGeneratedCode = productForm.productCode?.trim() || `019${String(products.length + 1).padStart(3, '0')}-1`;
+
+      const productToSave: FabricProduct = {
+        ...productForm,
+        id: productForm.id || `prod-${Date.now()}`,
+        name: productForm.name.trim(),
+        mainSection: (productForm.mainSection as MainSectionType) || 'cloths',
+        category: productForm.category || '',
+        categorySlug: productForm.categorySlug || 'general',
+        description: productForm.description || '',
+        availableStock: Number(productForm.availableStock) || 50,
+        minimumOrder: Number(productForm.minimumOrder) || 1,
+        unitLabel: productForm.unitLabel || '',
+        image: uploadedGallery[0] || productForm.image || '/hero-logo.png',
+        galleryImages: uploadedGallery,
+        colors: Array.isArray(productForm.colors) ? productForm.colors : ['Standard Original'],
+        fabricType: productForm.fabricType || '',
+        isNewArrival: !!productForm.isNewArrival,
+        isFeatured: !!productForm.isFeatured,
+        inStock: productForm.inStock !== false,
+        rating: productForm.rating || 4.9,
+        reviewCount: productForm.reviewCount || 20,
+        suitableFor: productForm.suitableFor || ['Retail & Wholesale'],
+        textureNote: productForm.textureNote || '',
+        origin: productForm.origin || 'Lagos, Nigeria',
+        isWholesaleAvailable: productForm.isWholesaleAvailable !== false,
+        wholesaleNote: productForm.wholesaleNote || 'Contact on WhatsApp for wholesale inquiry.',
+        badge: productForm.badge || '',
+        productCode: autoGeneratedCode,
+        price: Number(productForm.price) || Number(productForm.pricePerYard) || 0,
+        pricePerYard: Number(productForm.pricePerYard) || Number(productForm.price) || 0,
+      };
+
+      await onSaveProduct(productToSave);
+      setSaveSuccessMsg(`Saved "${productToSave.name}" permanently to Supabase database!`);
+      setTimeout(() => setSaveSuccessMsg(''), 5000);
+      setEditingProduct(null);
+      setIsCreatingNew(false);
+    } catch (err: any) {
+      console.error('Failed to save product to Supabase:', err);
+      setSaveErrorMsg(`Error saving to Supabase: ${err.message || String(err)}`);
+      setTimeout(() => setSaveErrorMsg(''), 7000);
+    } finally {
+      setIsSavingProduct(false);
+    }
   };
 
   const handleSaveSettings = (e: React.FormEvent) => {
@@ -532,9 +600,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Live Cloud Sync
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${
+              isSupabaseConfigured()
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              <span>{isSupabaseConfigured() ? 'Supabase: Live Connected' : 'Supabase: Offline Cache'}</span>
             </span>
             <button
               onClick={handleExitPortal}
@@ -545,6 +617,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Error Alert Banner */}
+        {saveErrorMsg && (
+          <div className="bg-red-600 text-white px-6 py-3 font-bold text-sm flex items-center justify-between animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              <span>{saveErrorMsg}</span>
+            </div>
+            <button onClick={() => setSaveErrorMsg('')} className="text-white/80 hover:text-white font-black text-xs">
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Success Alert Banner */}
         {saveSuccessMsg && (
@@ -968,8 +1053,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </div>
 
                     {/* Basic Info */}
-                    <div className="grid grid-cols-1 gap-5">
-                      <div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                      <div className="sm:col-span-2">
                         <label className="block text-xs font-bold text-gray-700 mb-1">
                           Product Name *
                         </label>
@@ -980,6 +1065,77 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
                           placeholder="e.g. Supreme Dutch Wax Ankara / Men's Italian Loafers"
                           className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-bold focus:ring-2 focus:ring-[#0F2E22]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          Category / Fabric Type
+                        </label>
+                        <input
+                          type="text"
+                          value={productForm.category || ''}
+                          onChange={(e) => setProductForm({ ...productForm, category: e.target.value, fabricType: e.target.value })}
+                          placeholder="e.g. Ankara Prints, Swiss Lace, Senator Cashmere, Industrial Machine"
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:ring-2 focus:ring-[#0F2E22]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          Price in Naira (₦)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          value={productForm.price !== undefined ? productForm.price : (productForm.pricePerYard || 0)}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setProductForm({ ...productForm, price: val, pricePerYard: val });
+                          }}
+                          placeholder="e.g. 15000"
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-bold focus:ring-2 focus:ring-[#0F2E22]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          Available Stock Quantity
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={productForm.availableStock !== undefined ? productForm.availableStock : 50}
+                          onChange={(e) => setProductForm({ ...productForm, availableStock: Number(e.target.value) })}
+                          placeholder="50"
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:ring-2 focus:ring-[#0F2E22]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          Design / Product Code
+                        </label>
+                        <input
+                          type="text"
+                          value={productForm.productCode || ''}
+                          onChange={(e) => setProductForm({ ...productForm, productCode: e.target.value })}
+                          placeholder="e.g. 019001-1"
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:ring-2 focus:ring-[#0F2E22]"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          Product Description & Material Details
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={productForm.description || ''}
+                          onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                          placeholder="Provide details about texture, authenticity, origin, recommended usage..."
+                          className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-[#0F2E22]"
                         />
                       </div>
                     </div>
@@ -1163,9 +1319,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </button>
                       <button
                         type="submit"
-                        className="px-8 py-3 rounded-xl bg-[#0F2E22] hover:bg-[#1B4332] text-white font-black text-sm shadow-md"
+                        disabled={isSavingProduct || isUploadingImage}
+                        className="px-8 py-3 rounded-xl bg-[#0F2E22] hover:bg-[#1B4332] text-white font-black text-sm shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
                       >
-                        Save Product to Store
+                        {isSavingProduct ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin text-[#D4AF37]" />
+                            <span>Saving to Supabase...</span>
+                          </>
+                        ) : isUploadingImage ? (
+                          <>
+                            <Upload className="w-4 h-4 animate-bounce text-[#D4AF37]" />
+                            <span>Uploading Photos...</span>
+                          </>
+                        ) : (
+                          <span>Save Product to Supabase</span>
+                        )}
                       </button>
                     </div>
 
@@ -1469,7 +1638,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
           {/* TAB 4: STORE PROFILE & SOCIAL SETTINGS */}
           {activeTab === 'settings' && (
-            <form onSubmit={handleSaveSettings} className="bg-white p-6 sm:p-8 rounded-2xl border border-[#E2D9CE] space-y-6 max-w-4xl mx-auto">
+            <div className="space-y-6 max-w-4xl mx-auto">
+              <form onSubmit={handleSaveSettings} className="bg-white p-6 sm:p-8 rounded-2xl border border-[#E2D9CE] space-y-6">
               <div>
                 <h3 className="text-lg font-black text-[#0F2E22]">
                   Store Identity, Social Media & Contact Details
@@ -1621,13 +1791,150 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                 <button
                   type="submit"
-                  className="px-8 py-3 rounded-xl bg-[#0F2E22] hover:bg-[#1B4332] text-white text-xs sm:text-sm font-black shadow-md"
+                  className="px-8 py-3 rounded-xl bg-[#0F2E22] hover:bg-[#1B4332] text-white text-xs sm:text-sm font-black shadow-md cursor-pointer"
                 >
                   Save Store Profile
                 </button>
               </div>
 
             </form>
+
+            {/* Supabase Cloud Connection & Sync Settings Card */}
+            <div className="bg-white p-6 sm:p-8 rounded-2xl border-2 border-[#0F2E22]/20 shadow-md space-y-6 max-w-4xl mx-auto mt-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E8E2D9] pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black uppercase text-[#D4AF37] block tracking-wider">
+                      PRIMARY DATABASE & REALTIME SYNC
+                    </span>
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      isSupabaseConfigured()
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : 'bg-amber-100 text-amber-800 border border-amber-300'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                      {isSupabaseConfigured() ? 'Connected to Supabase' : 'Offline / Setup Required'}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-[#0F2E22] mt-0.5">
+                    Supabase Cloud Database & Storage
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium">
+                    All product updates, images, and categories are saved directly to Supabase and synced automatically to every customer device.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSyncAllToCloud}
+                    disabled={isSyncing}
+                    className="px-4 py-2.5 rounded-xl bg-[#0F2E22] hover:bg-[#1B4332] text-white font-black text-xs flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    <UploadCloud className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Migrating...' : 'Push 55 Products to Supabase'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status & Project Details */}
+              <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E2D9CE] space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2">
+                  <span className="font-bold text-gray-600">Active Supabase Project URL:</span>
+                  <span className="font-mono font-semibold text-[#0F2E22] bg-white px-3 py-1 rounded-md border border-gray-200">
+                    {supabaseConfig?.url || 'Not configured in environment'}
+                  </span>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2">
+                  <span className="font-bold text-gray-600">Product Images Bucket:</span>
+                  <span className="font-mono font-semibold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-md border border-emerald-200">
+                    product-images (Public Storage)
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Config Form for Local Testing or Direct Setup */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-black uppercase text-gray-500 tracking-wider">
+                  Update Supabase Project Credentials
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Supabase Project URL (VITE_SUPABASE_URL)
+                    </label>
+                    <input
+                      type="text"
+                      value={supabaseUrlInput}
+                      onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                      placeholder="https://your-project.supabase.co"
+                      className="w-full px-4 py-2 rounded-xl border border-gray-300 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Supabase Anon Key (VITE_SUPABASE_ANON_KEY)
+                    </label>
+                    <input
+                      type="password"
+                      value={supabaseAnonKeyInput}
+                      onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
+                      placeholder="eyJhbGciOi..."
+                      className="w-full px-4 py-2 rounded-xl border border-gray-300 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  {supabaseConfigMsg ? (
+                    <span className="text-xs font-bold text-emerald-700">{supabaseConfigMsg}</span>
+                  ) : <span />}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!supabaseUrlInput.trim() || !supabaseAnonKeyInput.trim()) {
+                        setSupabaseConfigMsg('Please enter both Supabase URL and Anon Key');
+                        setTimeout(() => setSupabaseConfigMsg(''), 4000);
+                        return;
+                      }
+                      saveSupabaseConfig({
+                        url: supabaseUrlInput.trim(),
+                        anonKey: supabaseAnonKeyInput.trim()
+                      });
+                      setSupabaseConfigState(getSupabaseConfig());
+                      setSupabaseConfigMsg('Supabase configuration saved! Reloading live sync...');
+                      setTimeout(() => {
+                        setSupabaseConfigMsg('');
+                        window.location.reload();
+                      }, 1500);
+                    }}
+                    className="px-5 py-2 rounded-xl bg-[#D4AF37] hover:bg-[#c49b29] text-[#0F2E22] font-black text-xs shadow-sm cursor-pointer"
+                  >
+                    Save & Connect Supabase
+                  </button>
+                </div>
+              </div>
+
+              {/* Vercel Environment Instructions */}
+              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Vercel Deployment Instructions:</span>
+                </p>
+                <p className="leading-relaxed">
+                  In your Vercel Project Dashboard, navigate to <strong>Settings → Environment Variables</strong> and add:
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px] pt-1">
+                  <li><strong>VITE_SUPABASE_URL</strong>: e.g. <span className="text-emerald-700">https://xyzcompany.supabase.co</span></li>
+                  <li><strong>VITE_SUPABASE_ANON_KEY</strong>: your Supabase publishable anon public key</li>
+                </ul>
+                <p className="text-[11px] pt-1">
+                  Run the <strong>supabase-schema.sql</strong> script in your Supabase SQL Editor to initialize all tables, RLS policies, and storage buckets.
+                </p>
+              </div>
+            </div>
+          </div>
           )}
 
           {/* TAB 5: DELIVERY RATES */}

@@ -43,7 +43,7 @@ function loadProductsFromStorage(): FabricProduct[] {
     const data = localStorage.getItem(PRODUCTS_KEY);
     if (data !== null) {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
     }

@@ -1,9 +1,11 @@
 import { Category, FabricProduct, StoreSettings, SectionCategoryInfo, TailoringYardGuide, CustomerTestimonial } from '../types';
+import { PRODUCTS } from './products';
 
 export const INITIAL_CATEGORIES: Category[] = [
 ];
 
-export const INITIAL_PRODUCTS: FabricProduct[] = [];
+export const INITIAL_PRODUCTS: FabricProduct[] = PRODUCTS;
+
 
 export const STORE_SETTINGS: StoreSettings = {
   storeName: 'Ayobami SAM Ventures',

@@ -64,7 +64,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
       if (saved !== null) {
         const parsed: FabricProduct[] = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }

@@ -1,0 +1,282 @@
+{
+  "lastSyncTimestamp": 0,
+  "lastSyncDate": "Initial local catalog seeding",
+  "totalProducts": 55,
+  "products": {
+    "prod-1790568814395": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790568814395_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790577925676": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790577925676_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591214885": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591214885_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591287955": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591287955_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591507665": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591507665_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591604824": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591604824_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591660368": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591660368_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591716502": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591716502_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790591832831": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790591832831_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790592084866": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790592084866_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790592770547": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790592770547_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790592991165": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790592991165_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790593134517": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790593134517_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790610856714": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790610856714_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790611067872": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790611067872_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790611127352": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790611127352_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790611163074": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790611163074_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790662922654": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790662922654_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790663066091": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790663066091_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790663094306": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790663094306_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790663396049": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790663396049_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790665004892": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790665004892_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790665169859": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790665169859_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790783843881": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790783843881_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790783908028": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790783908028_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790783962778": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790783962778_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790784754117": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790784754117_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790785601191": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790785601191_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790830655233": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790830655233_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790831353766": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790831353766_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915340783": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915340783_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915424989": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915424989_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915446320": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915446320_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915460959": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915460959_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915476404": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915476404_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915493292": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915493292_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915511021": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915511021_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915534309": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915534309_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915547731": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915547731_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915569424": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915569424_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915590019": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915590019_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915605950": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915605950_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915627762": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915627762_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915642753": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915642753_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915920832": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915920832_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790915992974": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790915992974_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916153373": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916153373_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916187239": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916187239_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916221271": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916221271_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916250147": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916250147_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916728062": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916728062_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916808864": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916808864_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916900167": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916900167_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916935690": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916935690_main.jpg",
+      "lastModified": "2026-10-02"
+    },
+    "prod-1790916953536": {
+      "status": "SYNCED",
+      "image": "prod_prod-1790916953536_main.jpg",
+      "lastModified": "2026-10-02"
+    }
+  }
+}

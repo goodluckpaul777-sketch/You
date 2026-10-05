@@ -1,0 +1,6 @@
+{
+  "name": "Ayobami SAM Venture — Fabrics, Sewing Machines & Fashion Accessories",
+  "description": "Retail & Wholesale merchant in Lagos, Nigeria. Shop Ankara, Lace, Industrial & Domestic Sewing Machines, Shoes, Bags, and General Merchandise with delivery across Nigeria & Internationally.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

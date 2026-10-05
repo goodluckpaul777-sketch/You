@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
+        http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+
+  <!-- Homepage & Full Storefront -->
+  <url>
+    <loc>https://ais-pre-kwya6mursq2pxk34ndwlhj-385736428140.europe-west3.run.app/</loc>
+    <lastmod>2026-09-27</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Native Wear & Fabrics Department -->
+  <url>
+    <loc>https://ais-pre-kwya6mursq2pxk34ndwlhj-385736428140.europe-west3.run.app/#native-wear</loc>
+    <lastmod>2026-09-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Italian Native Shoes & Matching Bags -->
+  <url>
+    <loc>https://ais-pre-kwya6mursq2pxk34ndwlhj-385736428140.europe-west3.run.app/#shoes-bags</loc>
+    <lastmod>2026-09-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Wholesale Quotation & Bulk Orders -->
+  <url>
+    <loc>https://ais-pre-kwya6mursq2pxk34ndwlhj-385736428140.europe-west3.run.app/#quote-section</loc>
+    <lastmod>2026-09-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Physical Store Location & Balogun West Lagos Contact -->
+  <url>
+    <loc>https://ais-pre-kwya6mursq2pxk34ndwlhj-385736428140.europe-west3.run.app/#about-section</loc>
+    <lastmod>2026-09-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+</urlset>

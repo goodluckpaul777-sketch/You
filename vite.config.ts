@@ -11,6 +11,9 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    define: {
+      'process.env.FIREBASE_PROJECT_ID': JSON.stringify(process.env.FIREBASE_PROJECT_ID || ''),
+    },
     server: {
       host: '0.0.0.0',
       port: 3000,

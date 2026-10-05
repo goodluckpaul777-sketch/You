@@ -44,6 +44,8 @@ export interface FabricProduct {
   productCode?: string; // e.g. "019004-1" design code for admin identification
   pricePerYard?: number;
   price?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface InquiryItem {

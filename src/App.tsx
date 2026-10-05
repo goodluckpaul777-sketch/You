@@ -42,7 +42,7 @@ import { Footer } from './components/Footer';
 import { MessageCircle, Sparkles, Filter, SlidersHorizontal, Shirt, Footprints, Scissors, Search, Shield, ShoppingBag, Palette, ArrowLeft, ChevronLeft, ChevronRight, Layers, Package } from 'lucide-react';
 
 const STORAGE_KEYS = {
-  PRODUCTS: 'asv_products_v6_cleared',
+  PRODUCTS_CACHE: 'asv_firestore_cache_products',
   SETTINGS: 'asv_settings_v3_luxury',
   CART: 'asv_inquiry_cart_v3',
   ORDERS: 'asv_inquiries_v3',
@@ -58,10 +58,10 @@ function safeSetLocalStorage(key: string, data: any) {
 }
 
 export default function App() {
-  // Persistence state loaders
+  // Persistence state loaders - initializes with cached Firestore data or static catalog for zero layout shift
   const [products, setProducts] = useState<FabricProduct[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
+      const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS_CACHE);
       if (saved !== null) {
         const parsed: FabricProduct[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -172,11 +172,7 @@ export default function App() {
     return () => unsubQuota();
   }, []);
 
-  // Sync to localStorage safely with quota fallback
-  useEffect(() => {
-    safeSetLocalStorage(STORAGE_KEYS.PRODUCTS, products);
-  }, [products]);
-
+  // Sync cart and inquiries safely to localStorage
   useEffect(() => {
     safeSetLocalStorage(STORAGE_KEYS.SETTINGS, settings);
   }, [settings]);
@@ -921,24 +917,18 @@ export default function App() {
         onSaveProduct={(prod) => {
           setProducts(prev => {
             const idx = prev.findIndex(p => p.id === prod.id);
-            let updated: FabricProduct[];
             if (idx > -1) {
-              updated = [...prev];
+              const updated = [...prev];
               updated[idx] = prod;
+              return updated;
             } else {
-              updated = [prod, ...prev];
+              return [prod, ...prev];
             }
-            safeSetLocalStorage(STORAGE_KEYS.PRODUCTS, updated);
-            return updated;
           });
           saveProductToDatabase(prod).catch(console.error);
         }}
         onDeleteProduct={(id) => {
-          setProducts(prev => {
-            const updated = prev.filter(p => p.id !== id);
-            safeSetLocalStorage(STORAGE_KEYS.PRODUCTS, updated);
-            return updated;
-          });
+          setProducts(prev => prev.filter(p => p.id !== id));
           deleteProductFromDatabase(id).catch(console.error);
         }}
         onUpdateSettings={(newSettings) => {
